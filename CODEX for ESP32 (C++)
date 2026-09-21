@@ -1,0 +1,1150 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+// =====================================================
+// WIFI SETTINGS
+// =====================================================
+
+const char* AP_SSID = "SMART_FARM";
+const char* AP_PASSWORD = "12345678";
+
+WebServer server(80);
+
+// =====================================================
+// SENSOR PINS
+// =====================================================
+
+#define SOIL_SENSOR_PIN 34
+#define RAIN_SENSOR_PIN 27
+#define FIRE_SENSOR_PIN 26
+#define IR_SENSOR_PIN   25
+
+// =====================================================
+// OUTPUT PINS
+// =====================================================
+
+#define WATER_PUMP_PIN 18
+#define COVER_PIN      19
+#define COOLING_FAN_PIN 21
+#define SCARING_PIN    22
+
+// =====================================================
+// RELAY LOGIC
+// Most relay modules are ACTIVE LOW
+// =====================================================
+
+#define RELAY_ON  LOW
+#define RELAY_OFF HIGH
+
+// =====================================================
+// SOIL SENSOR CALIBRATION
+// Change these values after testing your sensor
+// =====================================================
+
+#define DRY_VALUE 850
+#define WET_VALUE 350
+
+// Water level threshold
+#define LOW_WATER_LEVEL 20
+
+// =====================================================
+// SENSOR VARIABLES
+// =====================================================
+
+int soilRaw = 0;
+int waterLevel = 0;
+
+bool rainDetected = false;
+bool fireDetected = false;
+bool animalDetected = false;
+
+// =====================================================
+// SYSTEM STATUS
+// =====================================================
+
+bool pumpStatus = false;
+bool coverStatus = false;
+bool fanStatus = false;
+bool scaringStatus = false;
+
+// =====================================================
+// HTML DASHBOARD
+// =====================================================
+
+const char MAIN_page[] PROGMEM = R"rawliteral(
+
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Smart Farm Control Center</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    background: #06111d;
+    color: white;
+}
+
+.header {
+    background: linear-gradient(135deg,#071a2b,#0d2b22);
+    padding: 22px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #18354a;
+}
+
+.logo {
+    font-size: 27px;
+    font-weight: bold;
+}
+
+.logo span {
+    color: #62d84e;
+}
+
+.subtitle {
+    color: #9fb3c8;
+    margin-top: 5px;
+}
+
+.online {
+    color: #65e85d;
+    font-weight: bold;
+}
+
+.container {
+    padding: 20px;
+    max-width: 1500px;
+    margin: auto;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns:
+    repeat(auto-fit,minmax(220px,1fr));
+
+    gap: 16px;
+}
+
+.card {
+    background: linear-gradient(145deg,#0b1c2d,#071522);
+    border: 1px solid #19354b;
+    border-radius: 15px;
+    padding: 20px;
+    min-height: 155px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+}
+
+.card-title {
+    color: #a9bacb;
+    font-size: 14px;
+    text-transform: uppercase;
+}
+
+.value {
+    font-size: 34px;
+    font-weight: bold;
+    margin-top: 12px;
+}
+
+.water {
+    color: #35a7ff;
+}
+
+.rain {
+    color: #22d3ee;
+}
+
+.fire {
+    color: #ff7a30;
+}
+
+.animal {
+    color: #b985ff;
+}
+
+.safe {
+    color: #63e85a;
+}
+
+.danger {
+    color: #ff4040;
+}
+
+.status {
+    margin-top: 10px;
+    font-size: 15px;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns:
+    2fr 1fr 1fr;
+
+    gap: 16px;
+
+    margin-top: 18px;
+}
+
+.panel {
+    background: #081827;
+    border: 1px solid #18364c;
+    border-radius: 15px;
+    padding: 20px;
+}
+
+.panel h2 {
+    margin-top: 0;
+    font-size: 18px;
+}
+
+.progress {
+    height: 20px;
+    background: #1b2a38;
+    border-radius: 20px;
+    overflow: hidden;
+    margin-top: 15px;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg,#1479ff,#35c7ff);
+    width: 72%;
+    transition: width 0.5s;
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
+    padding: 14px 0;
+    border-bottom: 1px solid #173044;
+}
+
+.row:last-child {
+    border-bottom: none;
+}
+
+.control {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    padding: 15px;
+
+    margin-bottom: 10px;
+
+    background: #0c1f30;
+
+    border-radius: 10px;
+}
+
+.badge {
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.badge-on {
+    background: #173d1b;
+    color: #64ef61;
+}
+
+.badge-off {
+    background: #302c2c;
+    color: #aaa;
+}
+
+.alert {
+    margin-top: 18px;
+    padding: 16px;
+    border-radius: 10px;
+    background: #10251a;
+    border: 1px solid #2e7d32;
+    color: #75ef70;
+}
+
+.alert-danger {
+    background: #351616;
+    border-color: #b52b2b;
+    color: #ff6666;
+}
+
+.info {
+    color: #8fa7bb;
+    font-size: 13px;
+}
+
+.footer {
+    text-align: center;
+    padding: 30px;
+    color: #72899d;
+}
+
+@media(max-width:900px) {
+
+    .grid {
+        grid-template-columns: 1fr;
+    }
+
+    .header {
+        display: block;
+    }
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="header">
+
+<div>
+
+<div class="logo">
+🌱 SMART FARM <span>CONTROL CENTER</span>
+</div>
+
+<div class="subtitle">
+IoT Real-Time Monitoring & Control System
+</div>
+
+</div>
+
+<div class="online">
+● ESP32 ONLINE
+</div>
+
+</div>
+
+
+<div class="container">
+
+<!-- SENSOR CARDS -->
+
+<div class="cards">
+
+<div class="card">
+
+<div class="card-title">
+💧 Water Level
+</div>
+
+<div class="value water">
+<span id="water">--</span>%
+</div>
+
+<div class="progress">
+<div id="waterBar" class="progress-bar"></div>
+</div>
+
+<div id="waterStatus" class="status">
+Reading...
+</div>
+
+</div>
+
+
+<div class="card">
+
+<div class="card-title">
+🌧️ Rain Status
+</div>
+
+<div id="rain" class="value rain">
+--
+</div>
+
+<div id="rainAction" class="status">
+--
+</div>
+
+</div>
+
+
+<div class="card">
+
+<div class="card-title">
+🔥 Fire Status
+</div>
+
+<div id="fire" class="value fire">
+--
+</div>
+
+<div id="fireAction" class="status">
+--
+</div>
+
+</div>
+
+
+<div class="card">
+
+<div class="card-title">
+🐗 Animal Status
+</div>
+
+<div id="animal" class="value animal">
+--
+</div>
+
+<div id="animalAction" class="status">
+--
+</div>
+
+</div>
+
+
+<div class="card">
+
+<div class="card-title">
+🟢 System Status
+</div>
+
+<div class="value safe">
+ONLINE
+</div>
+
+<div class="status">
+All monitoring systems active
+</div>
+
+</div>
+
+</div>
+
+
+<!-- MAIN GRID -->
+
+<div class="grid">
+
+
+<!-- ENVIRONMENT -->
+
+<div class="panel">
+
+<h2>📊 Environment Overview</h2>
+
+<div class="row">
+
+<span>💧 Soil Moisture</span>
+
+<strong>
+<span id="water2">--</span>%
+</strong>
+
+</div>
+
+
+<div class="row">
+
+<span>🌧️ Rain</span>
+
+<strong id="rain2">
+--
+</strong>
+
+</div>
+
+
+<div class="row">
+
+<span>🔥 Fire</span>
+
+<strong id="fire2">
+--
+</strong>
+
+</div>
+
+
+<div class="row">
+
+<span>🐗 Animal</span>
+
+<strong id="animal2">
+--
+</strong>
+
+</div>
+
+</div>
+
+
+<!-- SYSTEM CONTROL -->
+
+<div class="panel">
+
+<h2>⚙️ System Status</h2>
+
+
+<div class="control">
+
+<span>🚰 Water Pump</span>
+
+<span id="pump"
+class="badge badge-off">
+OFF
+</span>
+
+</div>
+
+
+<div class="control">
+
+<span>☂️ Covering</span>
+
+<span id="cover"
+class="badge badge-off">
+OFF
+</span>
+
+</div>
+
+
+<div class="control">
+
+<span>❄️ Cooling Fan</span>
+
+<span id="fan"
+class="badge badge-off">
+OFF
+</span>
+
+</div>
+
+
+<div class="control">
+
+<span>🔊 Scaring System</span>
+
+<span id="scare"
+class="badge badge-off">
+OFF
+</span>
+
+</div>
+
+</div>
+
+
+<!-- CONNECTION -->
+
+<div class="panel">
+
+<h2>📡 ESP32 Information</h2>
+
+<div class="row">
+
+<span>Wi-Fi</span>
+
+<strong>
+Connected
+</strong>
+
+</div>
+
+<div class="row">
+
+<span>Network</span>
+
+<strong>
+SMART_FARM
+</strong>
+
+</div>
+
+<div class="row">
+
+<span>IP Address</span>
+
+<strong>
+192.168.4.1
+</strong>
+
+</div>
+
+<div class="row">
+
+<span>Update</span>
+
+<strong>
+Live
+</strong>
+
+</div>
+
+</div>
+
+</div>
+
+
+<!-- ALERT -->
+
+<div id="alert"
+class="alert">
+
+✓ All systems operating normally
+
+</div>
+
+
+<div class="footer">
+
+Smart Farming System Using ESP32<br>
+
+Real-Time IoT Monitoring & Control
+
+</div>
+
+</div>
+
+
+<script>
+
+function updateDashboard()
+{
+
+fetch('/data')
+
+.then(response => response.json())
+
+.then(data => {
+
+
+// WATER
+
+document.getElementById("water").innerText =
+data.water;
+
+document.getElementById("water2").innerText =
+data.water;
+
+document.getElementById("waterBar").style.width =
+data.water + "%";
+
+
+if(data.water <= 20)
+{
+document.getElementById("waterStatus").innerText =
+"⚠ WATER LEVEL LOW";
+}
+else if(data.water < 40)
+{
+document.getElementById("waterStatus").innerText =
+"Water Level Low";
+}
+else
+{
+document.getElementById("waterStatus").innerText =
+"Water Level Normal";
+}
+
+
+// RAIN
+
+document.getElementById("rain").innerText =
+data.rain ? "RAIN DETECTED" : "NO RAIN";
+
+document.getElementById("rain2").innerText =
+data.rain ? "DETECTED" : "CLEAR";
+
+document.getElementById("rainAction").innerText =
+data.rain ?
+"☂ Covering System ACTIVE" :
+"Covering System INACTIVE";
+
+
+// FIRE
+
+document.getElementById("fire").innerText =
+data.fire ? "FIRE DETECTED" : "SAFE";
+
+document.getElementById("fire2").innerText =
+data.fire ? "DETECTED" : "SAFE";
+
+document.getElementById("fireAction").innerText =
+data.fire ?
+"🚰 Pump + Cooling Fan ACTIVE" :
+"Protection INACTIVE";
+
+
+// ANIMAL
+
+document.getElementById("animal").innerText =
+data.animal ?
+"ANIMAL DETECTED" :
+"CLEAR";
+
+document.getElementById("animal2").innerText =
+data.animal ?
+"DETECTED" :
+"CLEAR";
+
+document.getElementById("animalAction").innerText =
+data.animal ?
+"🔊 Scaring System ACTIVE" :
+"Scaring System INACTIVE";
+
+
+// OUTPUT STATUS
+
+updateStatus("pump",data.pump);
+updateStatus("cover",data.cover);
+updateStatus("fan",data.fan);
+updateStatus("scare",data.scare);
+
+
+// ALERT
+
+let alertBox =
+document.getElementById("alert");
+
+if(data.fire)
+{
+alertBox.className =
+"alert alert-danger";
+
+alertBox.innerText =
+"🔥 FIRE DETECTED — WATER PUMP AND COOLING FAN ACTIVE";
+}
+
+else if(data.animal)
+{
+alertBox.className =
+"alert alert-danger";
+
+alertBox.innerText =
+"🐗 ANIMAL DETECTED — SCARING SYSTEM ACTIVE";
+}
+
+else if(data.rain)
+{
+alertBox.className =
+"alert";
+
+alertBox.innerText =
+"🌧️ RAIN DETECTED — COVERING SYSTEM ACTIVE";
+}
+
+else if(data.water <= 20)
+{
+alertBox.className =
+"alert alert-danger";
+
+alertBox.innerText =
+"⚠️ WATER LEVEL LOW — WATER PUMP ACTIVE";
+}
+
+else
+{
+alertBox.className =
+"alert";
+
+alertBox.innerText =
+"✓ ALL SYSTEMS OPERATING NORMALLY";
+}
+
+});
+
+}
+
+
+function updateStatus(id,state)
+{
+
+let element =
+document.getElementById(id);
+
+if(state)
+{
+element.innerText = "ON";
+element.className =
+"badge badge-on";
+}
+else
+{
+element.innerText = "OFF";
+element.className =
+"badge badge-off";
+}
+
+}
+
+
+setInterval(updateDashboard,1000);
+
+updateDashboard();
+
+</script>
+
+</body>
+
+</html>
+
+)rawliteral";
+
+// =====================================================
+// READ SOIL MOISTURE
+// =====================================================
+
+void readSoilMoisture()
+{
+
+  soilRaw = analogRead(SOIL_SENSOR_PIN);
+
+  waterLevel = map(
+    soilRaw,
+    DRY_VALUE,
+    WET_VALUE,
+    0,
+    100
+  );
+
+  waterLevel = constrain(
+    waterLevel,
+    0,
+    100
+  );
+}
+
+// =====================================================
+// READ SENSORS
+// =====================================================
+
+void readSensors()
+{
+
+  readSoilMoisture();
+
+  /*
+   * Many rain/fire/IR modules use
+   * LOW = detected.
+   *
+   * If your module works opposite,
+   * change LOW to HIGH.
+   */
+
+  rainDetected =
+    digitalRead(RAIN_SENSOR_PIN) == LOW;
+
+  fireDetected =
+    digitalRead(FIRE_SENSOR_PIN) == LOW;
+
+  animalDetected =
+    digitalRead(IR_SENSOR_PIN) == LOW;
+}
+
+// =====================================================
+// AUTOMATIC SYSTEM CONTROL
+// =====================================================
+
+void automaticControl()
+{
+
+  // ---------------------------------
+  // LOW WATER
+  // ---------------------------------
+
+  if(waterLevel <= LOW_WATER_LEVEL)
+  {
+    pumpStatus = true;
+  }
+  else
+  {
+    pumpStatus = false;
+  }
+
+
+  // ---------------------------------
+  // RAIN
+  // ---------------------------------
+
+  if(rainDetected)
+  {
+    coverStatus = true;
+  }
+  else
+  {
+    coverStatus = false;
+  }
+
+
+  // ---------------------------------
+  // FIRE
+  // ---------------------------------
+
+  if(fireDetected)
+  {
+    fanStatus = true;
+    pumpStatus = true;
+  }
+  else
+  {
+    fanStatus = false;
+  }
+
+
+  // ---------------------------------
+  // ANIMAL
+  // ---------------------------------
+
+  if(animalDetected)
+  {
+    scaringStatus = true;
+  }
+  else
+  {
+    scaringStatus = false;
+  }
+
+
+  // ---------------------------------
+  // WRITE OUTPUTS
+  // ---------------------------------
+
+  digitalWrite(
+    WATER_PUMP_PIN,
+    pumpStatus ? RELAY_ON : RELAY_OFF
+  );
+
+  digitalWrite(
+    COVER_PIN,
+    coverStatus ? RELAY_ON : RELAY_OFF
+  );
+
+  digitalWrite(
+    COOLING_FAN_PIN,
+    fanStatus ? RELAY_ON : RELAY_OFF
+  );
+
+  digitalWrite(
+    SCARING_PIN,
+    scaringStatus ? RELAY_ON : RELAY_OFF
+  );
+}
+
+// =====================================================
+// JSON DATA
+// =====================================================
+
+String getJSON()
+{
+
+  String json = "{";
+
+  json += "\"water\":";
+  json += waterLevel;
+  json += ",";
+
+  json += "\"rain\":";
+  json += rainDetected ? "true" : "false";
+  json += ",";
+
+  json += "\"fire\":";
+  json += fireDetected ? "true" : "false";
+  json += ",";
+
+  json += "\"animal\":";
+  json += animalDetected ? "true" : "false";
+  json += ",";
+
+  json += "\"pump\":";
+  json += pumpStatus ? "true" : "false";
+  json += ",";
+
+  json += "\"cover\":";
+  json += coverStatus ? "true" : "false";
+  json += ",";
+
+  json += "\"fan\":";
+  json += fanStatus ? "true" : "false";
+  json += ",";
+
+  json += "\"scare\":";
+  json += scaringStatus ? "true" : "false";
+
+  json += "}";
+
+  return json;
+}
+
+// =====================================================
+// WEB SERVER
+// =====================================================
+
+void handleRoot()
+{
+  server.send_P(
+    200,
+    "text/html",
+    MAIN_page
+  );
+}
+
+void handleData()
+{
+
+  readSensors();
+
+  automaticControl();
+
+  server.send(
+    200,
+    "application/json",
+    getJSON()
+  );
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup()
+{
+
+  Serial.begin(115200);
+
+  // Sensor pins
+
+  pinMode(
+    SOIL_SENSOR_PIN,
+    INPUT
+  );
+
+  pinMode(
+    RAIN_SENSOR_PIN,
+    INPUT
+  );
+
+  pinMode(
+    FIRE_SENSOR_PIN,
+    INPUT
+  );
+
+  pinMode(
+    IR_SENSOR_PIN,
+    INPUT
+  );
+
+
+  // Output pins
+
+  pinMode(
+    WATER_PUMP_PIN,
+    OUTPUT
+  );
+
+  pinMode(
+    COVER_PIN,
+    OUTPUT
+  );
+
+  pinMode(
+    COOLING_FAN_PIN,
+    OUTPUT
+  );
+
+  pinMode(
+    SCARING_PIN,
+    OUTPUT
+  );
+
+
+  // Initially OFF
+
+  digitalWrite(
+    WATER_PUMP_PIN,
+    RELAY_OFF
+  );
+
+  digitalWrite(
+    COVER_PIN,
+    RELAY_OFF
+  );
+
+  digitalWrite(
+    COOLING_FAN_PIN,
+    RELAY_OFF
+  );
+
+  digitalWrite(
+    SCARING_PIN,
+    RELAY_OFF
+  );
+
+
+  // =================================================
+  // CREATE ESP32 ACCESS POINT
+  // =================================================
+
+  WiFi.mode(WIFI_AP);
+
+  WiFi.softAP(
+    AP_SSID,
+    AP_PASSWORD
+  );
+
+
+  Serial.println();
+  Serial.println("==============================");
+  Serial.println(" SMART FARM ESP32");
+  Serial.println("==============================");
+
+  Serial.print("Wi-Fi Name: ");
+  Serial.println(AP_SSID);
+
+  Serial.print("Password: ");
+  Serial.println(AP_PASSWORD);
+
+  Serial.print("Dashboard: ");
+  Serial.println(
+    WiFi.softAPIP()
+  );
+
+
+  // =================================================
+  // WEB ROUTES
+  // =================================================
+
+  server.on(
+    "/",
+    handleRoot
+  );
+
+  server.on(
+    "/data",
+    handleData
+  );
+
+  server.begin();
+
+  Serial.println(
+    "Web server started!"
+  );
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop()
+{
+
+  server.handleClient();
+
+}
